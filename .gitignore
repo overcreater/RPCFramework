@@ -1,0 +1,72 @@
+# IDE 配置文件
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# Eclipse
+.classpath
+.project
+.settings/
+bin/
+.metadata
+
+# VS Code
+.vscode/
+
+# NetBeans
+nbproject/
+nbbuild/
+dist/
+nbdist/
+.nb-gradle/
+
+# Maven 编译文件
+target/
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+
+# Maven Wrapper (如果使用)
+.mvn/wrapper/maven-wrapper.jar
+
+# 日志文件
+*.log
+*.log.*
+
+# 临时文件
+*.tmp
+*.bak
+*.swp
+*~.nib
+local.properties
+*.orig
+
+# 系统文件
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+.directory
+.Trash-*
+
+# 打包文件
+*.zip
+*.tar.gz
+*.rar
