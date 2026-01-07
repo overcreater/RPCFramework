@@ -7,27 +7,32 @@ import org.example.rpc.core.transport.RpcClient;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.util.*;
 
-/**
- * 动态代理
- * 把接口方法调用变成网络请求
- */
 public class RpcClientProxy implements InvocationHandler {
 
-    private final String host;
-    private final int port;
+    // 模式开关
+    private String host;
+    private int port;
+    private String serviceName; // 如果有 serviceName，说明走注册中心模式
 
+    // 构造器1：直连模式 (单服务器)
     public RpcClientProxy(String host, int port) {
         this.host = host;
         this.port = port;
     }
 
-    /**
-     * 获取代理对象
-     */
+    // 构造器2：集群模式 (走注册中心)
+    public RpcClientProxy(String serviceName) {
+        this.serviceName = serviceName;
+    }
+
     @SuppressWarnings("unchecked")
     public <T> T getProxy(Class<T> clazz) {
-        // 创建代理对象
         return (T) Proxy.newProxyInstance(
                 clazz.getClassLoader(),
                 new Class<?>[]{clazz},
@@ -35,29 +40,60 @@ public class RpcClientProxy implements InvocationHandler {
         );
     }
 
-    /**
-     * 这里的 invoke 方法会在你调用 helloService.hello() 时被自动执行
-     */
     @Override
     public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
-        // 1. 封装请求对象
+        // 1. 封装请求
         RpcRequest request = RpcRequest.builder()
                 .interfaceName(method.getDeclaringClass().getName())
                 .methodName(method.getName())
-                .parameters(args)
                 .paramTypes(method.getParameterTypes())
+                .parameters(args)
                 .build();
 
-        // 2. 创建 RpcClient 发送网络请求
-        RpcClient client = new RpcClient(host, port);
+        // 2. 确定目标 IP (关键升级点！)
+        String targetIp;
+        int targetPort;
 
-        // 3. 发送并等待结果
+        if (this.serviceName != null) {
+            // === 集群模式：去注册中心发现服务，并随机负载均衡 ===
+            List<String> addressList = discoverFromRegistry(this.serviceName);
+            // 简单随机负载均衡
+            int index = new Random().nextInt(addressList.size());
+            String chosenAddr = addressList.get(index);
+            String[] parts = chosenAddr.split(":");
+            targetIp = parts[0];
+            targetPort = Integer.parseInt(parts[1]);
+            System.out.println("【负载均衡】动态选择了节点: " + chosenAddr);
+        } else {
+            // === 直连模式 ===
+            targetIp = this.host;
+            targetPort = this.port;
+        }
+
+        // 3. 发送请求
+        RpcClient client = new RpcClient(targetIp, targetPort);
         RpcResponse response = client.sendRequest(request);
 
-        // 4. 返回结果给用户
-        if (response != null && response.getCode() == 200) {
-            return response.getData();
+        if (response == null) {
+            throw new RuntimeException("远程调用失败");
         }
-        return null;
+        return response.getData();
+    }
+
+    // 从注册中心获取列表的工具方法
+    private List<String> discoverFromRegistry(String serviceName) {
+        try {
+            // 这里硬编码了注册中心地址，实际项目应该写配置
+            String url = "http://10.206.255.171:8888/registry/discover?service=" + serviceName;
+            HttpClient httpClient = HttpClient.newHttpClient();
+            HttpRequest httpRequest = HttpRequest.newBuilder().uri(URI.create(url)).GET().build();
+            HttpResponse<String> httpResponse = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
+            String body = httpResponse.body().replace("[", "").replace("]", "").replace("\"", "");
+            if (body.isEmpty()) return Collections.emptyList();
+            return Arrays.asList(body.split(","));
+        } catch (Exception e) {
+            e.printStackTrace();
+            return Collections.emptyList();
+        }
     }
 }

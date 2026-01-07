@@ -1,6 +1,7 @@
 package org.example.demo.provider;
 
 import org.example.rpc.api.OrderService;
+import org.example.rpc.api.CalculatorService;
 import org.example.rpc.core.transport.RpcServer;
 import java.net.InetAddress;
 import java.net.URI;
@@ -21,6 +22,7 @@ public class ProviderApp {
         // 2. 启动 RPC 服务
         RpcServer server = new RpcServer("0.0.0.0", myPort);
         server.publishService(new OrderServiceImpl());
+        server.publishService(new CalculatorServiceImpl());
 
         // 3. 【关键】向注册中心汇报
         // 开启一个新线程去注册，避免阻塞启动
@@ -30,6 +32,9 @@ public class ProviderApp {
                 Thread.sleep(1000);
                 String myAddress = myIp + ":" + myPort;
                 registerToRegistry(serviceName, myAddress);
+
+                registerToRegistry(CalculatorService.class.getName(), myAddress);
+
             } catch (Exception e) {
                 e.printStackTrace();
             }
