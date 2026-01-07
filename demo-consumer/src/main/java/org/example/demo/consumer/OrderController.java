@@ -15,15 +15,16 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.*;
+import java.util.concurrent.*; // 新增：用于多线程并发
 
 @RestController
 public class OrderController {
 
-    @Autowired
+    @Autowired(required = false) // 加上 required=false 防止启动报错，后续手动初始化
     private OrderService orderService;
 
-    private CalculatorService singleService;  // 模式A：单机直连（启动时锁定一个IP）
-    private CalculatorService balanceService; // 模式B：负载均衡（每次调用随机IP）
+    private CalculatorService singleService;  // 模式A：单机直连
+    private CalculatorService balanceService; // 模式B：负载均衡
 
     @PostConstruct
     public void init() {
@@ -33,33 +34,27 @@ public class OrderController {
             // 1. 初始化负载均衡代理
             this.balanceService = new RpcClientProxy(serviceName).getProxy(CalculatorService.class);
 
-            // 2. 初始化单机直连代理 (保留你的逻辑)
+            // 2. 初始化订单服务 (防止 Autowired 失败)
+            this.orderService = new RpcClientProxy(OrderService.class.getName()).getProxy(OrderService.class);
+
+            // 3. 初始化单机直连代理
             List<String> allAddress = fetchFromRegistry(serviceName);
             if (allAddress.isEmpty()) {
                 System.out.println("⚠️ 警告：注册中心无服务，无法锁定单机目标");
                 return;
             }
 
-            // 智能选址：优先选远程，没有则选第一个
-            String target = allAddress.get(0);
-            String myIp = InetAddress.getLocalHost().getHostAddress();
-            for (String addr : allAddress) {
-                if (!addr.startsWith(myIp) && !addr.startsWith("127.0.0.1")) {
-                    target = addr;
-                    break;
-                }
-            }
-            System.out.println("【单机模式】已锁定目标节点: " + target);
-
-            String[] parts = target.split(":");
-            this.singleService = new RpcClientProxy(parts[0], Integer.parseInt(parts[1])).getProxy(CalculatorService.class);
-
+            // 智能选址
+            String myLocalIp = "10.206.255.171";
+            int myPort = 9999;
+            System.out.println("【单机模式】强制锁定本机: " + myLocalIp + ":" + myPort);
+            this.singleService = new RpcClientProxy(myLocalIp, myPort).getProxy(CalculatorService.class);
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
-    // --- 你原来的业务接口 (保留) ---
+    // --- 业务接口 ---
 
     @GetMapping("/buy")
     public String buy(@RequestParam String id) {
@@ -68,46 +63,88 @@ public class OrderController {
 
     @GetMapping("/calc/single")
     public String calcSingle(@RequestParam(defaultValue = "10000") int count) {
-        long start = System.currentTimeMillis();
-        // 显式调用 singleService
-        String result = singleService.calculatePi(count);
-        long end = System.currentTimeMillis();
-        return result + " <br>⏱️【耗时】" + (end - start) + " ms (模式：锁定单机)";
+        return singleService.calculatePi(count);
     }
 
     @GetMapping("/calc/balance")
     public String calcBalance(@RequestParam(defaultValue = "10000") int count) {
-        long start = System.currentTimeMillis();
-        // 显式调用 balanceService
-        String result = balanceService.calculatePi(count);
-        long end = System.currentTimeMillis();
-        return result + " <br>⏱️【耗时】" + (end - start) + " ms (模式：负载均衡)";
+        return balanceService.calculatePi(count);
     }
 
-    // --- 【新增】给网页可视化专用的 JSON 接口 ---
     @GetMapping("/api/visualize")
-    public Map<String, Object> visualize(@RequestParam(defaultValue = "2000000") int count) {
-        Map<String, Object> response = new HashMap<>();
+    public Map<String, Object> visualize(@RequestParam(defaultValue = "2000000") int count, @RequestParam String mode) {
+        // 保留旧接口，用于单个调试
         long start = System.currentTimeMillis();
-
-        // 既然是可视化负载均衡，当然用 balanceService
-        String rawResult = balanceService.calculatePi(count);
-
+        String res = "single".equals(mode) ? singleService.calculatePi(count) : balanceService.calculatePi(count);
         long end = System.currentTimeMillis();
 
-        // 解析 IP 用于前端变色
-        String nodeIp = "Unknown";
+        Map<String, Object> map = new HashMap<>();
+        map.put("node", extractIp(res));
+        map.put("cost", end - start);
+        return map;
+    }
+
+    // --- 【核心修改】服务端侧并发压测接口 ---
+    @GetMapping("/api/benchmark/strict")
+    public Map<String, Object> strictBenchmark(
+            @RequestParam(defaultValue = "50") int requests,
+            @RequestParam(defaultValue = "5000000") int complexity,
+            @RequestParam String mode
+    ) {
+        Map<String, Object> result = new HashMap<>();
+
+        // 1. 创建线程池，模拟 consumer 内部的高并发
+        // 使用 CachedThreadPool 或 FixedThreadPool 都可以，Fixed 更能模拟固定用户数
+        ExecutorService executor = Executors.newFixedThreadPool(requests);
+        List<Callable<String>> tasks = new ArrayList<>();
+
+        long start = System.currentTimeMillis();
+
+        // 2. 组装任务
+        for (int i = 0; i < requests; i++) {
+            tasks.add(() -> {
+                if ("single".equals(mode)) {
+                    return singleService.calculatePi(complexity);
+                } else {
+                    return balanceService.calculatePi(complexity);
+                }
+            });
+        }
+
+        // 3. 执行并获取结果
+        List<String> nodes = new ArrayList<>();
+        try {
+            // invokeAll 会等待所有任务完成
+            List<Future<String>> futures = executor.invokeAll(tasks);
+
+            for (Future<String> f : futures) {
+                // 提取 IP 用于前端绘图
+                nodes.add(extractIp(f.get()));
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        long end = System.currentTimeMillis();
+        executor.shutdown();
+
+        // 4. 返回统计数据
+        result.put("totalTime", end - start);
+        result.put("nodes", nodes); // 把所有处理节点的 IP 列表返给前端
+
+        return result;
+    }
+
+    // 辅助方法：从结果字符串中提取 IP
+    private String extractIp(String rawResult) {
         if (rawResult != null && rawResult.contains("【节点")) {
             try {
                 int s = rawResult.indexOf("【节点") + 4;
                 int e = rawResult.indexOf("】");
-                if (e > s) nodeIp = rawResult.substring(s, e).trim();
+                if (e > s) return rawResult.substring(s, e).trim();
             } catch (Exception ignored) {}
         }
-
-        response.put("node", nodeIp);
-        response.put("cost", end - start);
-        return response;
+        return "Unknown";
     }
 
     private List<String> fetchFromRegistry(String serviceName) {
