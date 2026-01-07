@@ -5,21 +5,56 @@ import org.example.rpc.core.proxy.RpcClientProxy;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+
 @Configuration
 public class RpcConfig {
 
     @Bean
     public OrderService orderService() {
-        // 🔥 这里填服务端的 IP 和端口 🔥
-        // 如果是本地测试填 "127.0.0.1"
-        // 如果是室友电脑，填他的局域网IP，例如 "192.168.31.50"
-        String remoteHost = "10.206.11.184";
-        int remotePort = 9999;
+        // 1. 从注册中心获取地址
+        String serviceName = OrderService.class.getName();
+        String address = getAddressFromRegistry(serviceName);
 
-        // 1. 创建代理工厂 (传入目标 IP 和端口)
-        RpcClientProxy proxy = new RpcClientProxy(remoteHost, remotePort);
+        System.out.println("从注册中心发现服务地址: " + address);
 
-        // 2. 获取接口的代理对象
-        return proxy.getProxy(OrderService.class);
+        // 2. 解析 IP 和 端口
+        String[] parts = address.split(":");
+        String ip = parts[0];
+        int port = Integer.parseInt(parts[1]);
+
+        // 3. 创建代理
+        return new RpcClientProxy(ip, port).getProxy(OrderService.class);
+    }
+
+    private String getAddressFromRegistry(String serviceName) {
+        try {
+            // 请求: http://localhost:8888/registry/discover?service=...
+            String url = "http://localhost:8888/registry/discover?service=" + serviceName;
+
+            HttpClient client = HttpClient.newHttpClient();
+            HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).GET().build();
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+            // 响应类似: ["192.168.1.5:9999"] (JSON数组格式)
+            String responseBody = response.body();
+
+            // 简单的字符串处理 (不做 JSON 解析库依赖，为了省事)
+            // 去掉 [" 和 "]
+            responseBody = responseBody.replace("[", "").replace("]", "").replace("\"", "");
+
+            if (responseBody.trim().isEmpty()) {
+                throw new RuntimeException("注册中心没有找到服务: " + serviceName);
+            }
+
+            // 如果有多个，逗号分隔，我们暂时取第一个 (负载均衡的雏形在这里！)
+            return responseBody.split(",")[0];
+
+        } catch (Exception e) {
+            throw new RuntimeException("无法连接注册中心: " + e.getMessage());
+        }
     }
 }
