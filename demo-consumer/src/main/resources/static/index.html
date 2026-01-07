@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>RPC Demo</title>
+</head>
+<body style="text-align: center; padding: 50px;">
+<h1>RPC 远程调用演示</h1>
+<input type="text" id="pid" placeholder="输入商品ID">
+<button onclick="buy()">购买</button>
+<pre id="result" style="background: #eee; padding: 20px; margin-top: 20px;"></pre>
+
+<script>
+    function buy() {
+        let id = document.getElementById("pid").value;
+        fetch("/buy?id=" + id)
+            .then(res => res.text())
+            .then(txt => document.getElementById("result").innerText = txt)
+            .catch(err => alert("失败: " + err));
+    }
+</script>
+</body>
+</html>

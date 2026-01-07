@@ -13,8 +13,8 @@
         <module>rpc-common</module>
         <module>rpc-core</module>
         <module>rpc-api</module>
-        <module>rpc-test-server</module>
-        <module>rpc-test-client</module>
+        <module>demo-provider</module>
+        <module>demo-consumer</module>
     </modules>
 
     <properties>
@@ -38,7 +38,13 @@
                         <source>17</source>
                         <target>17</target>
                         <encoding>UTF-8</encoding>
-                        <release>17</release>
+                        <annotationProcessorPaths>
+                            <path>
+                                <groupId>org.projectlombok</groupId>
+                                <artifactId>lombok</artifactId>
+                                <version>${lombok.version}</version>
+                            </path>
+                        </annotationProcessorPaths>
                     </configuration>
                 </plugin>
             </plugins>
