@@ -13,7 +13,7 @@ public class RpcConfig {
         // 🔥 这里填服务端的 IP 和端口 🔥
         // 如果是本地测试填 "127.0.0.1"
         // 如果是室友电脑，填他的局域网IP，例如 "192.168.31.50"
-        String remoteHost = "127.0.0.1";
+        String remoteHost = "10.206.11.184";
         int remotePort = 9999;
 
         // 1. 创建代理工厂 (传入目标 IP 和端口)
