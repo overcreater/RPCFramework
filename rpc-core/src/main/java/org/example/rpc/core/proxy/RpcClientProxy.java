@@ -12,7 +12,10 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.*;
-import java.util.concurrent.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 public class RpcClientProxy implements InvocationHandler {
 
@@ -24,7 +27,7 @@ public class RpcClientProxy implements InvocationHandler {
     // 锁对象，用于DCL
     private static final Object LOCK = new Object();
 
-    private static final String REGISTRY_HOST = "http://10.206.11.184:8888/registry/discover";
+    private static final String REGISTRY_HOST = "http://localhost:8888/registry/discover";
 
     // 后台定时刷新缓存
     static {
@@ -49,19 +52,33 @@ public class RpcClientProxy implements InvocationHandler {
             }
         }, 100, 300, TimeUnit.SECONDS);
     }
+
     private String host;
     private int port;
     private String serviceName;
+    private boolean useConnectionPool; // 是否使用连接池，默认true
 
-    // 构造器1：直连模式
+    // 构造器1：直连模式（默认使用连接池）
     public RpcClientProxy(String host, int port) {
-        this.host = host;
-        this.port = port;
+        this(host, port, true);
     }
 
-    // 构造器2：集群模式
+    // 构造器1a：直连模式（可指定是否使用连接池）
+    public RpcClientProxy(String host, int port, boolean useConnectionPool) {
+        this.host = host;
+        this.port = port;
+        this.useConnectionPool = useConnectionPool;
+    }
+
+    // 构造器2：集群模式（默认使用连接池）
     public RpcClientProxy(String serviceName) {
+        this(serviceName, true);
+    }
+
+    // 构造器2a：集群模式（可指定是否使用连接池）
+    public RpcClientProxy(String serviceName, boolean useConnectionPool) {
         this.serviceName = serviceName;
+        this.useConnectionPool = useConnectionPool;
     }
 
     @SuppressWarnings("unchecked")
@@ -129,8 +146,8 @@ public class RpcClientProxy implements InvocationHandler {
             targetPort = this.port;
         }
 
-        // 发送请求
-        RpcClient client = new RpcClient(targetIp, targetPort);
+        // 发送请求（根据配置决定是否使用连接池）
+        RpcClient client = new RpcClient(targetIp, targetPort, useConnectionPool);
         RpcResponse response = client.sendRequest(request);
 
         if (response == null) {

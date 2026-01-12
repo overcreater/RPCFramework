@@ -116,9 +116,11 @@ public class RpcClient {
 
     /**
      * 不使用连接池发送请求（原有方式）
+     * 使用 CountDownLatch 等待响应，然后关闭连接
      */
     private RpcResponse sendRequestWithoutPool(RpcRequest request) {
         EventLoopGroup group = new NioEventLoopGroup();
+        Channel channel = null;
         try {
             Bootstrap bootstrap = new Bootstrap();
             bootstrap.group(group)
@@ -138,22 +140,55 @@ public class RpcClient {
 
             // 1. 连接服务端
             ChannelFuture future = bootstrap.connect(host, port).sync();
-            Channel channel = future.channel();
+            channel = future.channel();
 
-            // 2. 发送请求数据
+            // 2. 设置响应等待机制（类似连接池模式）
+            AttributeKey<RpcResponse> responseKey = AttributeKey.valueOf("rpcResponse");
+            AttributeKey<Boolean> responseReceivedKey = AttributeKey.valueOf("responseReceived");
+            AttributeKey<CountDownLatch> latchKey = AttributeKey.valueOf("responseLatch");
+
+            channel.attr(responseKey).set(null);
+            channel.attr(responseReceivedKey).set(false);
+
+            // 创建CountDownLatch用于等待响应
+            CountDownLatch latch = new CountDownLatch(1);
+            channel.attr(latchKey).set(latch);
+
+            // 3. 发送请求数据
             channel.writeAndFlush(request).sync();
 
-            // 3. 阻塞等待连接关闭 (意味着数据接收完毕)
-            channel.closeFuture().sync();
+            // 4. 等待响应（最多10秒）
+            boolean received = latch.await(10, TimeUnit.SECONDS);
 
-            // 4. 获取 RpcClientHandler 存入的结果
-            AttributeKey<RpcResponse> key = AttributeKey.valueOf("rpcResponse");
-            return channel.attr(key).get();
+            if (received) {
+                // 5. 获取响应
+                RpcResponse response = channel.attr(responseKey).get();
+                // 6. 关闭连接（不使用连接池，每次请求后关闭）
+                if (channel != null && channel.isActive()) {
+                    channel.close();
+                }
+                return response;
+            } else {
+                // 超时
+                if (channel != null && channel.isActive()) {
+                    channel.close();
+                }
+                throw new RuntimeException("RPC调用超时: " + host + ":" + port);
+            }
 
         } catch (InterruptedException e) {
-            e.printStackTrace();
+            Thread.currentThread().interrupt();
+            if (channel != null && channel.isActive()) {
+                channel.close();
+            }
             return null;
+        } catch (Exception e) {
+            if (channel != null && channel.isActive()) {
+                channel.close();
+            }
+            throw new RuntimeException("RPC调用失败: " + e.getMessage(), e);
         } finally {
+            // 关闭EventLoopGroup（会自动关闭所有连接）
             group.shutdownGracefully();
         }
     }
