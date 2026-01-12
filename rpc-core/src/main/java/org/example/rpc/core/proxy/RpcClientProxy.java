@@ -34,7 +34,12 @@ public class RpcClientProxy implements InvocationHandler {
 
                 // 遍历所有订阅的服务，去注册中心拉取最新列表
                 for (String service : SUBSCRIBED_SERVICES) {
+                    // === 【修改点】每次刷新前先手动移除缓存，确保不残留脏数据 ===
+                    SERVICE_CACHE.remove(service);
+
                     List<String> urls = discoverFromRegistry(service);
+                    // 只有当注册中心有数据时才放回去
+                    // 如果注册中心返回空（服务全挂了），缓存里就一直保持为空，Invoke的时候会报错而不是连错地址
                     if (!urls.isEmpty()) {
                         SERVICE_CACHE.put(service, urls);
                     }

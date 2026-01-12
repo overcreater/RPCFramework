@@ -70,3 +70,4 @@ $RECYCLE.BIN/
 *.zip
 *.tar.gz
 *.rar
+demo-provider/src/main/java/org/example/demo/provider/ProviderApp.java
