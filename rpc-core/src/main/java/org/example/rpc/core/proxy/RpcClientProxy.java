@@ -12,20 +12,21 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
 public class RpcClientProxy implements InvocationHandler {
-    // 缓存
+
+    // 全局缓存与订阅记录
     private static final Map<String, List<String>> SERVICE_CACHE = new ConcurrentHashMap<>();
     //订阅列表
     private static final Set<String> SUBSCRIBED_SERVICES = ConcurrentHashMap.newKeySet();
     private static final ScheduledExecutorService SCHEDULER = Executors.newSingleThreadScheduledExecutor();
+    // 锁对象，用于DCL
+    private static final Object LOCK = new Object();
+
     private static final String REGISTRY_HOST = "http://10.206.11.184:8888/registry/discover";
 
-    // 定时刷新
+    // 后台定时刷新缓存
     static {
         SCHEDULER.scheduleAtFixedRate(() -> {
             try {
@@ -39,11 +40,10 @@ public class RpcClientProxy implements InvocationHandler {
                     }
                 }
             } catch (Exception e) {
-                System.err.println("【后台】刷新缓存异常: " + e.getMessage());
+                System.err.println("【后台】缓存刷新失败: " + e.getMessage());
             }
-        }, 10, 30, TimeUnit.SECONDS);
+        }, 100, 300, TimeUnit.SECONDS);
     }
-
     private String host;
     private int port;
     private String serviceName;
@@ -73,6 +73,7 @@ public class RpcClientProxy implements InvocationHandler {
         if (Object.class.equals(method.getDeclaringClass())) {
             return method.invoke(this, args);
         }
+
         RpcRequest request = RpcRequest.builder()
                 .interfaceName(method.getDeclaringClass().getName())
                 .methodName(method.getName())
@@ -84,23 +85,30 @@ public class RpcClientProxy implements InvocationHandler {
         String targetIp;
         int targetPort;
 
+        // 集群模式：服务发现 + 负载均衡
         if (this.serviceName != null) {
             SUBSCRIBED_SERVICES.add(this.serviceName);
 
             // 尝试从本地缓存获取
             List<String> addressList = SERVICE_CACHE.get(this.serviceName);
 
-            // 缓存未命中（第一次调用）：同步去注册中心拉取
+            // Double-Check Locking 处理缓存击穿
             if (addressList == null || addressList.isEmpty()) {
-                System.out.println("【客户端】缓存未命中，直连注册中心查询: " + this.serviceName);
-                addressList = discoverFromRegistry(this.serviceName);
-                if (addressList.isEmpty()) {
-                    throw new RuntimeException("注册中心无可用服务: " + this.serviceName);
+                synchronized (LOCK) {
+                    // 二次检查
+                    addressList = SERVICE_CACHE.get(this.serviceName);
+                    if (addressList == null || addressList.isEmpty()) {
+                        System.out.println("【客户端】DCL锁命中，拉取注册中心: " + this.serviceName);
+                        addressList = discoverFromRegistry(this.serviceName);
+                        if (addressList.isEmpty()) {
+                            throw new RuntimeException("无可用服务节点: " + this.serviceName);
+                        }
+                        SERVICE_CACHE.put(this.serviceName, addressList);
+                    }
                 }
-                SERVICE_CACHE.put(this.serviceName, addressList);
             }
 
-            // 简单随机负载均衡
+            // 随机负载均衡
             int index = new Random().nextInt(addressList.size());
             String chosenAddr = addressList.get(index);
 
@@ -111,6 +119,7 @@ public class RpcClientProxy implements InvocationHandler {
 
 
         } else {
+            // 直连模式
             targetIp = this.host;
             targetPort = this.port;
         }
@@ -120,12 +129,12 @@ public class RpcClientProxy implements InvocationHandler {
         RpcResponse response = client.sendRequest(request);
 
         if (response == null) {
-            throw new RuntimeException("远程调用失败，返回为空");
+            throw new RuntimeException("RPC调用无响应");
         }
         return response.getData();
     }
 
-    // 从注册中心获取列表的工具方法
+    // 注册中心查询工具
     private static List<String> discoverFromRegistry(String serviceName) {
         try {
             String url = REGISTRY_HOST + "?service=" + serviceName;
@@ -152,7 +161,7 @@ public class RpcClientProxy implements InvocationHandler {
                 return list;
             }
         } catch (Exception e) {
-            System.err.println("【客户端】连接注册中心失败: " + e.getMessage());
+            System.err.println("【客户端】注册中心连接异常: " + e.getMessage());
         }
         return Collections.emptyList();
     }
