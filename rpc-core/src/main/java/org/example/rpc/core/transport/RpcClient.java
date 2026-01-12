@@ -80,7 +80,7 @@ public class RpcClient {
             channel.writeAndFlush(request).sync();
 
             // 4. 等待响应（使用CountDownLatch，更高效）
-            boolean received = latch.await(10, TimeUnit.SECONDS);
+            boolean received = latch.await(100, TimeUnit.SECONDS);
 
             if (received) {
                 // 响应已接收

@@ -48,22 +48,64 @@ public class OrderController {
             // 3. 初始化单机直连代理
             List<String> allAddress = fetchFromRegistry(serviceName);
 
-            // 智能选址：使用localhost连接本机服务（即使注册中心无服务也尝试连接）
-            String localhost = "localhost";
-            int port = 9999;
+            // 智能选址：从注册中心选择除本机外的另一个服务地址
+            String targetHost = "localhost";
+            int targetPort = 9999;
 
-            if (allAddress.isEmpty()) {
-                System.out.println("⚠️ 警告：注册中心无服务，将尝试直接连接 localhost:" + port);
-            } else {
-                System.out.println("【单机模式】锁定本机: " + localhost + ":" + port);
+            // 获取本机IP地址
+            String myIp = null;
+            try {
+                myIp = java.net.InetAddress.getLocalHost().getHostAddress();
+            } catch (Exception e) {
+                System.out.println("⚠️ 无法获取本机IP: " + e.getMessage());
             }
 
-            this.singleService = new RpcClientProxy(localhost, port).getProxy(CalculatorService.class);
+            if (allAddress.isEmpty()) {
+                System.out.println("⚠️ 警告：注册中心无服务，将尝试直接连接 localhost:" + targetPort);
+            } else {
+                // 从服务列表中选择除本机外的另一个地址
+                String selectedAddress = null;
+                for (String addr : allAddress) {
+                    String[] parts = addr.split(":");
+                    if (parts.length == 2) {
+                        String addrIp = parts[0];
+                        // 排除本机IP和localhost
+                        if (myIp != null && !addrIp.equals(myIp) && !addrIp.equals("localhost") && !addrIp.equals("127.0.0.1")) {
+                            selectedAddress = addr;
+                            break;
+                        } else if (myIp == null && !addrIp.equals("localhost") && !addrIp.equals("127.0.0.1")) {
+                            // 如果无法获取本机IP，排除localhost和127.0.0.1
+                            selectedAddress = addr;
+                            break;
+                        }
+                    }
+                }
 
-            // 初始化连接池对比测试用的服务实例（无论注册中心是否有服务都初始化）
-            this.singleServiceWithPool = new RpcClientProxy(localhost, port, true).getProxy(CalculatorService.class);
-            this.singleServiceWithoutPool = new RpcClientProxy(localhost, port, false).getProxy(CalculatorService.class);
-            System.out.println("【连接池对比】已初始化：使用连接池=" + true + ", 不使用连接池=" + false);
+                if (selectedAddress != null) {
+                    String[] parts = selectedAddress.split(":");
+                    targetHost = parts[0];
+                    targetPort = Integer.parseInt(parts[1]);
+                    System.out.println("【单机模式】从注册中心选择服务: " + targetHost + ":" + targetPort);
+                } else {
+                    // 如果没有找到其他服务，使用localhost
+                    System.out.println("【单机模式】未找到其他服务，使用本地服务: " + targetHost + ":" + targetPort);
+                }
+            }
+
+            this.singleService = new RpcClientProxy(targetHost, targetPort).getProxy(CalculatorService.class);
+
+            // 初始化连接池对比测试用的服务实例（使用本机IP地址）
+            String myLocalIp = "localhost";
+            int myLocalPort = 9999;
+            try {
+                myLocalIp = java.net.InetAddress.getLocalHost().getHostAddress();
+            } catch (Exception e) {
+                System.out.println("⚠️ 无法获取本机IP，使用localhost: " + e.getMessage());
+            }
+
+            this.singleServiceWithPool = new RpcClientProxy(myLocalIp, myLocalPort, true).getProxy(CalculatorService.class);
+            this.singleServiceWithoutPool = new RpcClientProxy(myLocalIp, myLocalPort, false).getProxy(CalculatorService.class);
+            System.out.println("【连接池对比】已初始化：使用本机IP=" + myLocalIp + ":" + myLocalPort + ", 使用连接池=" + true + ", 不使用连接池=" + false);
         } catch (Exception e) {
             e.printStackTrace();
         }

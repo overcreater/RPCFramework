@@ -35,7 +35,7 @@ public class ChannelPool {
     private final ConcurrentHashMap<String, BlockingQueue<Channel>> pool = new ConcurrentHashMap<>();
 
     // 每个地址的最大连接数
-    private static final int MAX_CONNECTIONS_PER_ADDRESS = 20;
+    private static final int MAX_CONNECTIONS_PER_ADDRESS = 50;
 
     // Bootstrap和EventLoopGroup复用
     private final Bootstrap bootstrap;
