@@ -1,5 +1,7 @@
 package org.example.demo.consumer;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import org.example.rpc.api.CalculatorService;
 import org.example.rpc.api.OrderService;
@@ -9,13 +11,15 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.net.InetAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.*;
-import java.util.concurrent.*; // 新增：用于多线程并发
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 @RestController
 public class OrderController {
@@ -45,7 +49,7 @@ public class OrderController {
             }
 
             // 智能选址
-            String myLocalIp = "10.206.255.171";
+            String myLocalIp = "10.206.11.184";
             int myPort = 9999;
             System.out.println("【单机模式】强制锁定本机: " + myLocalIp + ":" + myPort);
             this.singleService = new RpcClientProxy(myLocalIp, myPort).getProxy(CalculatorService.class);
@@ -142,7 +146,8 @@ public class OrderController {
                 int s = rawResult.indexOf("【节点") + 4;
                 int e = rawResult.indexOf("】");
                 if (e > s) return rawResult.substring(s, e).trim();
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+            }
         }
         return "Unknown";
     }
@@ -158,6 +163,40 @@ public class OrderController {
             return Arrays.asList(body.split(","));
         } catch (Exception e) {
             return Collections.emptyList();
+        }
+    }
+
+    // 获取注册中心所有服务信息（用于可视化）
+    @GetMapping("/api/registry/all")
+    public Map<String, Object> getAllRegistryServices() {
+        try {
+            String url = "http://localhost:8888/registry/all";
+            HttpClient client = HttpClient.newHttpClient();
+            HttpRequest req = HttpRequest.newBuilder().uri(URI.create(url)).GET().build();
+            HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
+
+            if (resp.statusCode() == 200) {
+                // 使用Jackson解析JSON
+                ObjectMapper mapper = new ObjectMapper();
+                Map<String, Object> registryData = mapper.readValue(resp.body(),
+                        new TypeReference<Map<String, Object>>() {
+                        });
+
+                Map<String, Object> result = new HashMap<>();
+                result.put("success", true);
+                result.put("data", registryData);
+                return result;
+            } else {
+                Map<String, Object> result = new HashMap<>();
+                result.put("success", false);
+                result.put("message", "注册中心返回错误: " + resp.statusCode());
+                return result;
+            }
+        } catch (Exception e) {
+            Map<String, Object> result = new HashMap<>();
+            result.put("success", false);
+            result.put("message", "连接注册中心失败: " + e.getMessage());
+            return result;
         }
     }
 }

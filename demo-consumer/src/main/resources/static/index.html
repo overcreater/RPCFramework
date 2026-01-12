@@ -21,7 +21,7 @@
             background: #fff;
             padding: 40px;
             border: 1px solid #ddd;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
         }
 
         h1 {
@@ -92,14 +92,32 @@
             transition: background-color 0.2s;
         }
 
-        .btn-primary { background-color: #3498db; color: white; }
-        .btn-primary:hover { background-color: #2980b9; }
+        .btn-primary {
+            background-color: #3498db;
+            color: white;
+        }
 
-        .btn-secondary { background-color: #95a5a6; color: white; }
-        .btn-secondary:hover { background-color: #7f8c8d; }
+        .btn-primary:hover {
+            background-color: #2980b9;
+        }
 
-        .btn-dark { background-color: #2c3e50; color: white; }
-        .btn-dark:hover { background-color: #1a252f; }
+        .btn-secondary {
+            background-color: #95a5a6;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background-color: #7f8c8d;
+        }
+
+        .btn-dark {
+            background-color: #2c3e50;
+            color: white;
+        }
+
+        .btn-dark:hover {
+            background-color: #1a252f;
+        }
 
         /* 输出日志区域 */
         .log-panel {
@@ -146,8 +164,17 @@
             height: 10px;
             margin-right: 5px;
         }
-        .bg-node-a { background-color: #3498db; } /* 蓝色 */
-        .bg-node-b { background-color: #e74c3c; } /* 红色 */
+
+        .bg-node-a {
+            background-color: #3498db;
+        }
+
+        /* 蓝色 */
+        .bg-node-b {
+            background-color: #e74c3c;
+        }
+
+        /* 红色 */
 
         .metrics-table {
             width: 100%;
@@ -155,12 +182,76 @@
             margin-top: 15px;
             font-size: 13px;
         }
+
         .metrics-table th, .metrics-table td {
             border: 1px solid #ddd;
             padding: 8px;
             text-align: left;
         }
-        .metrics-table th { background-color: #f1f1f1; }
+
+        .metrics-table th {
+            background-color: #f1f1f1;
+        }
+
+        /* 服务注册中心样式 */
+        .service-item {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+        }
+
+        .service-name {
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 10px;
+            font-size: 14px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #dee2e6;
+        }
+
+        .instance-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .instance-item {
+            padding: 8px 12px;
+            background: #fff;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .instance-status {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: #27ae60;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.5;
+            }
+        }
+
+        .empty-state {
+            padding: 40px;
+            text-align: center;
+            color: #999;
+            font-size: 14px;
+        }
     </style>
 </head>
 <body>
@@ -176,6 +267,34 @@
             <button class="btn-primary" onclick="submitOrder()">提交请求</button>
         </div>
         <div id="orderLog" class="log-panel">就绪.</div>
+    </div>
+
+    <div class="module">
+        <h3>服务注册中心可视化 (Service Registry)</h3>
+        <div class="control-group">
+            <button class="btn-primary" onclick="refreshRegistry()">刷新服务列表</button>
+            <button class="btn-secondary" onclick="startAutoRefresh()">自动刷新 (5秒)</button>
+            <button class="btn-secondary" onclick="stopAutoRefresh()">停止自动刷新</button>
+            <span id="registryStatus" style="margin-left: 20px; color: #27ae60; font-weight: 600;"></span>
+        </div>
+        <div id="registryInfo" style="margin-top: 15px;">
+            <div style="padding: 15px; background: #fff; border: 1px solid #ddd;">
+                <div style="display: flex; gap: 30px; margin-bottom: 15px;">
+                    <div>
+                        <strong>总服务数:</strong> <span id="totalServices">0</span>
+                    </div>
+                    <div>
+                        <strong>总实例数:</strong> <span id="totalInstances">0</span>
+                    </div>
+                    <div>
+                        <strong>最后更新:</strong> <span id="lastUpdate">-</span>
+                    </div>
+                </div>
+                <div id="servicesList" style="max-height: 400px; overflow-y: auto;">
+                    <div style="padding: 20px; text-align: center; color: #999;">点击"刷新服务列表"加载数据</div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <div class="module">
@@ -334,6 +453,118 @@
         nodeStats = {};
         colorMap = {};
     }
+
+    // --- 3. 服务注册中心可视化 ---
+    let autoRefreshInterval = null;
+
+    async function refreshRegistry() {
+        const statusEl = document.getElementById('registryStatus');
+        const servicesListEl = document.getElementById('servicesList');
+
+        statusEl.innerText = '加载中...';
+        statusEl.style.color = '#3498db';
+
+        try {
+            const res = await fetch('/api/registry/all');
+            const result = await res.json();
+
+            if (result.success && result.data) {
+                // 数据已经解析好了
+                const data = result.data;
+                renderRegistryData(data);
+                statusEl.innerText = '✓ 已更新';
+                statusEl.style.color = '#27ae60';
+
+                // 更新最后更新时间
+                const now = new Date();
+                document.getElementById('lastUpdate').innerText =
+                    now.toLocaleTimeString('zh-CN');
+            } else {
+                throw new Error(result.message || '获取数据失败');
+            }
+        } catch (e) {
+            statusEl.innerText = '✗ 加载失败: ' + e.message;
+            statusEl.style.color = '#e74c3c';
+            servicesListEl.innerHTML =
+                '<div class="empty-state">无法连接到注册中心，请确保注册中心已启动 (端口8888)</div>';
+        }
+    }
+
+    function renderRegistryData(data) {
+        const servicesListEl = document.getElementById('servicesList');
+        const totalServicesEl = document.getElementById('totalServices');
+        const totalInstancesEl = document.getElementById('totalInstances');
+
+        // 更新统计信息
+        totalServicesEl.innerText = data.totalServices || 0;
+        totalInstancesEl.innerText = data.totalInstances || 0;
+
+        // 渲染服务列表
+        if (!data.services || Object.keys(data.services).length === 0) {
+            servicesListEl.innerHTML = '<div class="empty-state">暂无注册的服务</div>';
+            return;
+        }
+
+        let html = '';
+        for (const [serviceName, instances] of Object.entries(data.services)) {
+            const shortName = serviceName.split('.').pop(); // 简化显示
+            html += `
+                <div class="service-item">
+                    <div class="service-name">
+                        ${serviceName}
+                        <span style="font-size: 12px; color: #7f8c8d; font-weight: normal;">
+                            (${instances.length} 个实例)
+                        </span>
+                    </div>
+                    <div class="instance-list">
+            `;
+
+            if (instances && instances.length > 0) {
+                instances.forEach(instance => {
+                    const [ip, port] = instance.split(':');
+                    html += `
+                        <div class="instance-item">
+                            <span class="instance-status"></span>
+                            <span><strong>${ip}</strong>:${port}</span>
+                        </div>
+                    `;
+                });
+            } else {
+                html += '<div style="color: #999; font-size: 12px;">暂无实例</div>';
+            }
+
+            html += `
+                    </div>
+                </div>
+            `;
+        }
+
+        servicesListEl.innerHTML = html;
+    }
+
+    function startAutoRefresh() {
+        if (autoRefreshInterval) {
+            clearInterval(autoRefreshInterval);
+        }
+        refreshRegistry(); // 立即刷新一次
+        autoRefreshInterval = setInterval(refreshRegistry, 5000); // 每5秒刷新
+        document.getElementById('registryStatus').innerText = '自动刷新已启动 (5秒)';
+        document.getElementById('registryStatus').style.color = '#27ae60';
+    }
+
+    function stopAutoRefresh() {
+        if (autoRefreshInterval) {
+            clearInterval(autoRefreshInterval);
+            autoRefreshInterval = null;
+            document.getElementById('registryStatus').innerText = '自动刷新已停止';
+            document.getElementById('registryStatus').style.color = '#95a5a6';
+        }
+    }
+
+    // 页面加载时自动刷新一次
+    window.addEventListener('load', function () {
+        setTimeout(refreshRegistry, 1000); // 延迟1秒，确保服务已启动
+    });
 </script>
 
 </body>

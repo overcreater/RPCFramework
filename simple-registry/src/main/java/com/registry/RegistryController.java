@@ -31,4 +31,18 @@ public class RegistryController {
         System.out.println("【注册中心】服务发现: " + service + " -> " + list);
         return list == null ? new ArrayList<>() : list;
     }
+
+    // 动作：获取所有服务信息（用于可视化）
+    // URL: GET http://localhost:8888/registry/all
+    @GetMapping("/all")
+    public Map<String, Object> getAllServices() {
+        Map<String, Object> result = new HashMap<>();
+        result.put("services", SERVICE_MAP);
+        result.put("totalServices", SERVICE_MAP.size());
+        int totalInstances = SERVICE_MAP.values().stream()
+                .mapToInt(List::size)
+                .sum();
+        result.put("totalInstances", totalInstances);
+        return result;
+    }
 }
