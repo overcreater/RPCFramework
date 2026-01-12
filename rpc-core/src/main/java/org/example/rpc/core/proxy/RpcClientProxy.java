@@ -12,7 +12,10 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.*;
-import java.util.concurrent.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 public class RpcClientProxy implements InvocationHandler {
     // 缓存
@@ -20,7 +23,7 @@ public class RpcClientProxy implements InvocationHandler {
     //订阅列表
     private static final Set<String> SUBSCRIBED_SERVICES = ConcurrentHashMap.newKeySet();
     private static final ScheduledExecutorService SCHEDULER = Executors.newSingleThreadScheduledExecutor();
-    private static final String REGISTRY_HOST = "http://10.206.255.171:8888/registry/discover";
+    private static final String REGISTRY_HOST = "http://10.206.11.184:8888/registry/discover";
 
     // 定时刷新
     static {
@@ -40,6 +43,7 @@ public class RpcClientProxy implements InvocationHandler {
             }
         }, 10, 30, TimeUnit.SECONDS);
     }
+
     private String host;
     private int port;
     private String serviceName;
